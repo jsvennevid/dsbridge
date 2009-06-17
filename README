@@ -1,0 +1,48 @@
+DSBridge
+--------
+
+DSBridge is a small wrapper application that redirects the DirectSound API
+(only basic DirectSound currently) and exposes the playing stream as an
+MP3 stream with metadata.
+
+Dependencies
+------------
+
+* lame_enc.dll (I developed this using 3.98.2) - NOT INCLUDED
+
+Usage
+-----
+
+Drop dsound.dll along with listed dependencies in the same folder as the
+program you want to wrap and start it. After music playback has been initiated,
+point your MP3 playback software to http://localhost:8124/ and hopefully you
+should hear music playing.
+
+To assist you, when you start playing a small icon will appear in the systray.
+This icon will be either blue (server is idle), green (somebody is connected),
+yellow (warning) or red (error). It also displays the URL to listen in the
+tooltip text.
+
+If you cannot get your software to connect to the stream, you might have
+to specify your IP address explicitly (this behaviour has been seen with
+SqueezeCenter even when you are running it locally). Then just specify
+http://ip.add.re.ss:8124/ and it should play happily.
+
+Issues
+------
+
+* MP3 stream does not support multiple listeners, so connecting more than one
+listener will sound... strange.
+
+* Currently no format conversion takes place, so if the wrapped software
+plays using something else than 44.1kHz stereo the encoder will not output a
+proper stream.
+
+
+Todo
+----
+
+* DirectSoundBuffer8 support
+* Add configuration capabilities
+* Stabilize streaming support
+* Improve HTTP server
