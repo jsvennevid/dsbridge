@@ -92,7 +92,7 @@ static LPVOID getDSProc(const char* name)
 			return 0;
 		}
 
-		Notify::update(Notify::DirectSound, Notify::Info, "DirectSound Bridge loaded");
+		Notify::update(Notify::DirectSound, Notify::Info, "Loaded");
 	}
 
 	return GetProcAddress(module, name);

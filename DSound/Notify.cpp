@@ -155,15 +155,19 @@ void Notify::updateInternal(ClassType classType, State state, const char* format
 		m_lastTime = newTime;
 		m_lastState = state;
 
-		char buf[64];
-		vsnprintf_s(buf+2, sizeof(buf)-2, sizeof(buf)-2, format, ap);
+		const char* className = "";
 		switch (classType)
 		{
-			case DirectSound: buf[0] = 'D'; break;
-			case Encoder: buf[0] = 'E'; break;
-			case HttpServer: buf[0] = 'H'; break;
+			case DirectSound: className = "DirectSound"; break;
+			case Encoder: className = "Encoder"; break;
+			case HttpServer: className = "HttpServer"; break;
 		}
-		buf[1] = ':';
+
+		char intfmt[64];
+		sprintf_s(intfmt, sizeof(intfmt), "DSBridge\n%s: %s", className, format);
+
+		char buf[64];
+		vsnprintf_s(buf, sizeof(buf), sizeof(buf), intfmt, ap);
 
 		memset(&data, 0, sizeof(data));
 		data.cbSize = sizeof(data);
