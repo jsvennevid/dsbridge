@@ -27,6 +27,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "DSBridge.h"
 #include "DirectSound.h"
+#include "Configuration.h"
 #include "HttpServer.h"
 #include "Encoder.h"
 #include "Notify.h"
@@ -63,17 +64,22 @@ typedef HRESULT (WINAPI *DSCaptureCreate8)(LPCGUID pcGuidDevice, LPDIRECTSOUNDCA
 
 HttpServer g_httpServer;
 Encoder g_encoder;
+Configuration g_configuration;
 
 static LPVOID getDSProc(const char* name)
 {
 	static HMODULE module = 0;
 	if (!module)
 	{
-		char* windir = 0;
-		char location[256];
-		errno_t err = _dupenv_s(&windir, 0, "windir");
-		sprintf_s(location, sizeof(location), "%s\\SYSTEM32\\DSOUND.DLL", err ? windir : "C:\\WINDOWS");
-		free(windir);
+		static char location[MAX_PATH];
+		int length = GetSystemDirectory(location, sizeof(location));
+		if (!length || (length >= sizeof(location)))
+		{
+			Notify::update(Notify::DirectSound, Notify::Error, "Could not locate system directory", location);
+			return 0;
+		}
+
+		sprintf_s(location, sizeof(location), "%s\\DSOUND.DLL", location);
 		module = LoadLibrary(location);
 		DSBRIDGE_ASSERT(module, "Could not load DSOUND.DLL");
 		if (!module)
