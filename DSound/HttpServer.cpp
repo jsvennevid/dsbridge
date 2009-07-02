@@ -480,9 +480,15 @@ void HttpServer::processStreaming(Client& client)
 		return;
 	}
 
-	size_t actual = m_buffer.read(client.m_buffer + client.m_bufferSize, maxRead);
-	client.m_bufferSize += actual;	
-	client.m_metaOffset -= actual;
+	EnterCriticalSection(&m_cs);
+	do
+	{
+		size_t actual = m_buffer.read(client.m_buffer + client.m_bufferSize, maxRead);
+		client.m_bufferSize += actual;	
+		client.m_metaOffset -= actual;
+	}
+	while (0);
+	LeaveCriticalSection(&m_cs);
 }
 
 }
