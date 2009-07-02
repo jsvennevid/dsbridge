@@ -395,7 +395,16 @@ void HttpServer::processHeader(Client& client)
 					break;
 				}
 
-				if (!::memcmp(begin, "Icy-MetaData:", 13))
+				const char* headerEnd = begin;
+				while ((headerEnd != end) && (*headerEnd != ':')) ++headerEnd;
+
+				if (headerEnd == end)
+				{
+					break;
+				}
+				const char* valueBegin = headerEnd + 1;
+
+				if (((headerEnd - begin) == 12) && !::_strnicmp(begin, "Icy-MetaData", 12))
 				{
 					const char* value = begin;
 					while ((eol != end) && (*eol == ' ')) ++eol;
