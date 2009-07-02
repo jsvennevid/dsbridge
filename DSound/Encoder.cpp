@@ -29,6 +29,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "HttpServer.h"
 #include "Notify.h"
 #include "ExceptionHandler.h"
+#include "Configuration.h"
 
 #include <stdio.h>
 
@@ -76,8 +77,7 @@ bool Encoder::create()
 	init.format.LHV1.dwSampleRate = 44100;
 	init.format.LHV1.dwReSampleRate = 0;
 	init.format.LHV1.nMode = BE_MP3_MODE_JSTEREO;
-	init.format.LHV1.dwBitrate = 160;
-	init.format.LHV1.dwMaxBitrate = 160;
+	init.format.LHV1.dwBitrate = init.format.LHV1.dwMaxBitrate = Configuration::getInteger("MP3BitRate", 192);
 	init.format.LHV1.nPreset = LQP_NOPRESET;
 	init.format.LHV1.bCopyright = false;
 	init.format.LHV1.bCRC = false;
