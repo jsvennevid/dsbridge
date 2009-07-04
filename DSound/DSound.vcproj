@@ -60,7 +60,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="ws2_32.lib"
+				AdditionalDependencies="ws2_32.lib gdiplus.lib"
 				LinkIncremental="2"
 				ModuleDefinitionFile="library.def"
 				GenerateDebugInformation="true"
@@ -135,7 +135,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="ws2_32.lib"
+				AdditionalDependencies="ws2_32.lib gdiplus.lib"
 				LinkIncremental="1"
 				ModuleDefinitionFile="library.def"
 				GenerateDebugInformation="true"

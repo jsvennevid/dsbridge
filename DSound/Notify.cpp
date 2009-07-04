@@ -32,7 +32,6 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <stdio.h>
 #include <time.h>
 
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <ShellAPI.h>
 

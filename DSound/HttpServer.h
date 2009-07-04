@@ -30,9 +30,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "RingBuffer.h"
 
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <winsock2.h>
 
 namespace dsbridge
 {
@@ -55,8 +53,9 @@ private:
 	enum ClientState
 	{
 		Header,
+		Close,
 		Streaming,
-		Dead
+		Cover
 	};
 
 	struct Client
@@ -68,7 +67,14 @@ private:
 		, m_bufferOffset(0)
 		, m_metaOffset(0)
 		, m_metaData(false)
-		{}
+		, m_cover(0)
+		, m_coverOffset(0)
+		, m_coverSize(0)
+		, m_titleHash(0)
+		, m_sendCover(false)
+		{
+			m_host[0] = '\0';
+		}
 
 		SOCKET m_socket;
 		ClientState m_state;
@@ -78,6 +84,15 @@ private:
 		size_t m_bufferOffset;
 		size_t m_metaOffset;
 		bool m_metaData;
+
+		char* m_cover;
+		size_t m_coverOffset;
+		size_t m_coverSize;
+
+		unsigned int m_titleHash;
+		bool m_sendCover;
+
+		char m_host[512];
 	};
 
 	static DWORD WINAPI threadEntry(LPVOID parameter);
@@ -88,6 +103,9 @@ private:
 
 	void processHeader(Client& client);
 	void processStreaming(Client& client);
+	void processCover(Client& client);
+
+	static unsigned int hash(const char* str, size_t length);
 
 	HANDLE m_thread;
 	HANDLE m_io;
@@ -102,6 +120,7 @@ private:
 	CRITICAL_SECTION m_cs;
 
 	time_t m_lastAnnounce;
+	int m_port;
 
 	static const unsigned int s_metaSize = 45000;
 };

@@ -28,7 +28,6 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <audiodefs.h>
 

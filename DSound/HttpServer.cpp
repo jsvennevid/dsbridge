@@ -28,6 +28,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "HttpServer.h"
 #include "Notify.h"
 #include "ExceptionHandler.h"
+#include "Configuration.h"
+
+#include <windows.h>
+#include <gdiplus.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,6 +47,7 @@ HttpServer::HttpServer()
 , m_clientCount(0)
 , m_running(false)
 , m_lastAnnounce(time(0))
+, m_port(0)
 {}
 
 HttpServer::~HttpServer()
@@ -134,10 +139,10 @@ bool HttpServer::initialize()
 	SOCKADDR_IN saddr;
 	saddr.sin_family = AF_INET;
 	saddr.sin_addr.S_un.S_addr = INADDR_ANY;
-	saddr.sin_port = htons(8124);
+	saddr.sin_port = htons(m_port = Configuration::getInteger("ListenPort", 8124));
 	if (::bind(m_socket, reinterpret_cast<SOCKADDR*>(&saddr), sizeof(saddr)) < 0)
 	{
-		Notify::update(Notify::HttpServer, Notify::Error, "Could not bind to port %d", ntohs(saddr.sin_port));
+		Notify::update(Notify::HttpServer, Notify::Error, "Could not bind to port %d", m_port);
 		return false;
 	}
 
@@ -161,7 +166,7 @@ bool HttpServer::initialize()
 		return false;
 	}
 
-	Notify::update(Notify::HttpServer, Notify::Info, "Listening on port %d", ntohs(saddr.sin_port));
+	Notify::update(Notify::HttpServer, Notify::Info, "Listening on port %d", m_port);
 	return true;
 }
 
@@ -179,7 +184,7 @@ bool HttpServer::run()
 	if ((newAnnounce - m_lastAnnounce) > 5)
 	{
 		Notify::setConnected(m_clientCount > 0);
-		Notify::update(Notify::HttpServer, Notify::Info, "http://localhost:%d/", 8124);
+		Notify::update(Notify::HttpServer, Notify::Info, "http://localhost:%d/", m_port);
 		m_lastAnnounce = newAnnounce;
 	}
 
@@ -194,8 +199,9 @@ bool HttpServer::run()
 			}
 			break;
 
+			case Close:
 			case Streaming:
-			case Dead:
+			case Cover:
 			{
 				FD_SET(client.m_socket, &wfds);
 			}
@@ -231,7 +237,7 @@ bool HttpServer::run()
 				int result = ::recv(client.m_socket, client.m_buffer + client.m_bufferSize, int(sizeof(client.m_buffer) - client.m_bufferSize), 0);
 				if (result <= 0)
 				{
-					client.m_state = Dead;
+					client.m_state = Close;
 					client.m_bufferSize = client.m_bufferOffset = 0;
 					break;
 				}
@@ -242,23 +248,59 @@ bool HttpServer::run()
 			}
 			break;
 
-			case Streaming:
-			case Dead:
+			case Close:
 			{
 				if (!FD_ISSET(client.m_socket, &wfds))
 				{
 					break;
 				}
 
-				if (client.m_state == Streaming)
+				int result = ::send(client.m_socket, client.m_buffer + client.m_bufferOffset, int(client.m_bufferSize - client.m_bufferOffset), 0);
+				if (result == SOCKET_ERROR)
 				{
-					processStreaming(client);
+					client.m_state = Close;	
+					client.m_bufferSize = client.m_bufferOffset = 0;
+					break;
 				}
+
+				client.m_bufferOffset += result;
+			}
+			break;
+
+			case Streaming:
+			{
+				if (!FD_ISSET(client.m_socket, &wfds))
+				{
+					break;
+				}
+
+				processStreaming(client);
 
 				int result = ::send(client.m_socket, client.m_buffer + client.m_bufferOffset, int(client.m_bufferSize - client.m_bufferOffset), 0);
 				if (result == SOCKET_ERROR)
 				{
-					client.m_state = Dead;	
+					client.m_state = Close;	
+					client.m_bufferSize = client.m_bufferOffset = 0;
+					break;
+				}
+
+				client.m_bufferOffset += result;
+			}
+			break;
+
+			case Cover:
+			{
+				if (!FD_ISSET(client.m_socket, &wfds))
+				{
+					break;
+				}
+
+				processCover(client);
+
+				int result = ::send(client.m_socket, client.m_buffer + client.m_bufferOffset, int(client.m_bufferSize - client.m_bufferOffset), 0);
+				if (result == SOCKET_ERROR)
+				{
+					client.m_state = Close;	
 					client.m_bufferSize = client.m_bufferOffset = 0;
 					break;
 				}
@@ -272,11 +314,13 @@ bool HttpServer::run()
 	for (unsigned int i = 0; i < m_clientCount;)
 	{
 		Client& client = m_clients[i];
-		if ((client.m_state != Dead) || (client.m_bufferSize != client.m_bufferOffset))
+		if ((client.m_state != Close) || (client.m_bufferSize != client.m_bufferOffset))
 		{
 			++i;
 			continue;
 		}
+
+		delete [] client.m_cover;
 
 		::closesocket(client.m_socket);
 
@@ -322,6 +366,7 @@ void HttpServer::processHeader(Client& client)
 		ParseRequest,
 		ParseHeader
 	} state = ParseRequest;
+	ClientState clientState = Close;
 
 	for (const char* begin = client.m_buffer, *end = client.m_buffer + client.m_bufferSize; (begin != end) && (client.m_state == Header);)
 	{
@@ -338,29 +383,48 @@ void HttpServer::processHeader(Client& client)
 			case ParseRequest:
 			{
 				const char* curr = begin;
+				const char* methodBegin = curr;
+				const char* methodEnd = methodBegin;
+				while ((methodEnd != eol) && (*methodEnd != ' ')) ++methodEnd;
 
-				// TODO: proper request parsing
-
-				if (::memcmp(curr, "GET ", 4))
+				if ((methodEnd == eol) || ((methodEnd-methodBegin) != 3) || ::_strnicmp(methodBegin, "GET", 3))
 				{
-					client.m_state = Dead;
-					client.m_bufferSize = client.m_bufferOffset = 0;
+					client.m_state = Close;
+					sprintf_s(client.m_buffer, sizeof(client.m_buffer), "HTTP/1.0 405 Method Not Allowed\r\nAllow: GET\r\n\r\n");
+					client.m_bufferSize = static_cast<int>(::strlen(client.m_buffer));
+					client.m_bufferOffset = 0;
 					break;
 				}
-				curr += 4;
-				
-				if (::memcmp(curr, "/ ",2))
+				curr = methodEnd + 1;
+
+				const char* uriBegin = curr;
+				const char* uriEnd = uriBegin;
+				while ((uriEnd != eol) && (*uriEnd != ' ')) ++uriEnd;
+
+				if ((uriEnd != eol) && ((uriEnd-uriBegin) == 1) && !::_strnicmp(uriBegin, "/", 1))
 				{
-					client.m_state = Dead;
-					client.m_bufferSize = client.m_bufferOffset = 0;
+					clientState = Streaming;
+				}
+				else if ((uriEnd != eol) && ((uriEnd-uriBegin) >= 6) && !::_strnicmp(uriBegin, "/cover", 6))
+				{
+					clientState = Cover;
+				}
+				else
+				{
+					client.m_state = Close;
+					sprintf_s(client.m_buffer, sizeof(client.m_buffer), "HTTP/1.0 404 Not Found\r\n\r\n");
+					client.m_bufferSize = static_cast<int>(::strlen(client.m_buffer));
+					client.m_bufferOffset = 0;
 					break;
 				}
-				curr += 2;
+				curr = uriEnd + 1;
 
-				if (!(!::memcmp(curr, "HTTP/1.0", 8) || !::memcmp(curr, "HTTP/1.1", 8)))
+				if (((eol-curr) != 8) || (::_strnicmp(curr,"HTTP/1.0",8) && ::_strnicmp(curr,"HTTP/1.1",8)))
 				{
-					client.m_state = Dead;
-					client.m_bufferSize = client.m_bufferOffset = 0;
+					client.m_state = Close;
+					sprintf_s(client.m_buffer, sizeof(client.m_buffer), "HTTP/1.0 505 HTTP Version Not Supported\r\n\r\n");
+					client.m_bufferSize = static_cast<int>(::strlen(client.m_buffer));
+					client.m_bufferOffset = 0;
 					break;
 				}
 
@@ -372,22 +436,23 @@ void HttpServer::processHeader(Client& client)
 			{
 				if (begin == eol)
 				{
-/*
-					if (m_clientCount > 1)
-					{
-						client.m_state = Dead;
-						sprintf_s(client.m_buffer, sizeof(client.m_buffer), "HTTP/1.0 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nOnly one streaming client allowed currently!\n");
-						client.m_bufferSize = static_cast<int>(::strlen(client.m_buffer));
-						break;
-					}
-*/
-					client.m_state = Streaming;
+					client.m_state = clientState;
 					sprintf_s(client.m_buffer, sizeof(client.m_buffer), "HTTP/1.0 200 OK\r\n");
-					sprintf_s(client.m_buffer, sizeof(client.m_buffer), "%sContent-Type: audio/mpeg\r\n", client.m_buffer);
+
 					if (client.m_metaData)
 					{
 						sprintf_s(client.m_buffer, sizeof(client.m_buffer), "%sicy-metaint: %d\r\n", client.m_buffer, s_metaSize);
 					}
+
+					if (client.m_state == Cover)
+					{
+						sprintf_s(client.m_buffer, sizeof(client.m_buffer), "%sContent-Type: image/png\r\n", client.m_buffer);
+					}
+					else if (client.m_state == Streaming)
+					{
+					sprintf_s(client.m_buffer, sizeof(client.m_buffer), "%sContent-Type: audio/mpeg\r\n", client.m_buffer);
+					}
+
 					sprintf_s(client.m_buffer, sizeof(client.m_buffer), "%s\r\n", client.m_buffer);
 
 					client.m_bufferSize = static_cast<int>(::strlen(client.m_buffer));
@@ -396,13 +461,14 @@ void HttpServer::processHeader(Client& client)
 				}
 
 				const char* headerEnd = begin;
-				while ((headerEnd != end) && (*headerEnd != ':')) ++headerEnd;
+				while ((headerEnd != eol) && (*headerEnd != ':')) ++headerEnd;
 
-				if (headerEnd == end)
+				if (headerEnd == eol)
 				{
 					break;
 				}
 				const char* valueBegin = headerEnd + 1;
+				while ((valueBegin != eol) && (*valueBegin == ' ')) ++valueBegin;
 
 				if (((headerEnd - begin) == 12) && !::_strnicmp(begin, "Icy-MetaData", 12))
 				{
@@ -413,6 +479,12 @@ void HttpServer::processHeader(Client& client)
 					{
 						client.m_metaData = true;
 					}
+				}
+
+				if (((headerEnd - begin) == 4) && !::_strnicmp(begin, "Host", 4))
+				{
+					::memset(client.m_host, 0, sizeof(client.m_host));
+					::strncpy_s(client.m_host, sizeof(client.m_host), valueBegin, eol - valueBegin);
 				}
 			}
 			break;
@@ -425,7 +497,7 @@ void HttpServer::processHeader(Client& client)
 
 	if ((client.m_bufferSize == sizeof(client.m_buffer)) && (client.m_state == Header))
 	{
-		client.m_state = Dead;
+		client.m_state = Close;
 		client.m_bufferSize = client.m_bufferOffset = 0;
 	}
 }
@@ -459,8 +531,26 @@ void HttpServer::processStreaming(Client& client)
 			windowTitle[0] = '\0';
 		}
 
-		char buf[512];
-		sprintf_s(buf, sizeof(buf), "StreamTitle='%s';", windowTitle);
+		unsigned int newHash = hash(windowTitle, ::strlen(windowTitle));
+		if (newHash == client.m_titleHash && !client.m_sendCover)
+		{
+			client.m_buffer[0] = '\0';
+			client.m_bufferSize = 1;
+			break;
+		}
+
+		char* buf = client.m_buffer+1;
+		size_t bufsize = sizeof(client.m_buffer)-1;
+		if (newHash != client.m_titleHash)
+		{
+			sprintf_s(buf, bufsize, "StreamTitle='%s';", windowTitle);
+			client.m_sendCover = Notify::window() && ::strlen(client.m_host) > 0;
+		}
+		else if (client.m_sendCover)
+		{
+			sprintf_s(buf, bufsize, "StreamUrl='http://%s/cover/%d.png';", client.m_host, time(0));
+			client.m_sendCover = false;
+		}
 		size_t length = ::strlen(buf) + 1;
 		size_t fill = ((length + 15) & ~15) - length;
 		size_t packetLength = length + fill;
@@ -468,9 +558,9 @@ void HttpServer::processStreaming(Client& client)
 		memset(buf + length, 0, fill);
 
 		client.m_buffer[0] = char(packetLength / 16);
-		memcpy(client.m_buffer + 1, buf, packetLength);
 
 		client.m_bufferSize = packetLength + 1;
+		client.m_titleHash = newHash;
 	}
 	while (0);
 
@@ -489,6 +579,335 @@ void HttpServer::processStreaming(Client& client)
 	}
 	while (0);
 	LeaveCriticalSection(&m_cs);
+}
+
+unsigned int HttpServer::hash(const char* str, size_t length)
+{
+	unsigned int hash = 0;
+
+	for(unsigned int i = 0; i < length; ++str, ++i)
+	{
+		unsigned int x;
+
+		hash = (hash << 4) + (*str);
+
+		if((x = hash & 0xF0000000L) != 0)
+		{
+			hash ^= (x >> 24);
+		}
+
+		hash &= ~x;
+	}
+
+	return hash;
+}
+
+int GetEncoderClsid(const WCHAR* format, CLSID* pClsid)
+{
+	using namespace Gdiplus;
+	UINT  num = 0;          // number of image encoders
+	UINT  size = 0;         // size of the image encoder array in bytes
+
+	ImageCodecInfo* pImageCodecInfo = NULL;
+
+	GetImageEncodersSize(&num, &size);
+	if(size == 0)
+	return -1;  // Failure
+
+	pImageCodecInfo = (ImageCodecInfo*)(malloc(size));
+	if(pImageCodecInfo == NULL)
+	return -1;  // Failure
+
+	GetImageEncoders(num, size, pImageCodecInfo);
+
+	for(UINT j = 0; j < num; ++j)
+	{
+		if( wcscmp(pImageCodecInfo[j].MimeType, format) == 0 )
+		{
+			*pClsid = pImageCodecInfo[j].Clsid;
+			free(pImageCodecInfo);
+			return j;  // Success
+		}
+	}
+
+	free(pImageCodecInfo);
+	return 0;
+}
+
+class MemoryStream : public ::IStream
+{
+public:
+	MemoryStream()
+	: m_buffer(0)
+	, m_offset(0)
+	, m_size(0)
+	, m_capacity(0)
+	{}
+
+	~MemoryStream()
+	{
+		delete [] m_buffer;
+	}
+
+	// IUnknown
+
+    virtual HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void ** ppvObject)
+    { 
+        if (iid == __uuidof(IUnknown)
+            || iid == __uuidof(IStream)
+            || iid == __uuidof(ISequentialStream))
+        {
+            *ppvObject = static_cast<IStream*>(this);
+            AddRef();
+            return S_OK;
+        } else
+            return E_NOINTERFACE; 
+    }
+
+    virtual ULONG STDMETHODCALLTYPE AddRef(void) 
+    { 
+		return 1;
+    }
+
+    virtual ULONG STDMETHODCALLTYPE Release(void) 
+    {
+		return 1;
+    }
+
+	// ISequentialStream
+
+    virtual HRESULT STDMETHODCALLTYPE Read(void* pv, ULONG cb, ULONG* pcbRead)
+    {
+		ULONG maxRead = static_cast<ULONG>(cb > (m_size - m_offset) ? (m_size - m_offset) : cb);
+
+		::memcpy_s(pv, cb, m_buffer, maxRead);
+		m_offset += maxRead;
+
+		if (pcbRead)
+		{
+			*pcbRead = maxRead;
+		}
+
+		return S_OK;
+    }
+
+    virtual HRESULT STDMETHODCALLTYPE Write(void const* pv, ULONG cb, ULONG* pcbWritten)
+    {
+		ULONG maxWrite = static_cast<ULONG>(cb > (m_capacity - m_offset) ? (m_capacity - m_offset) : cb);
+		if (maxWrite != cb)
+		{
+			m_capacity = m_size + cb * 2;
+			unsigned char* newBuffer = new unsigned char[static_cast<size_t>(m_capacity)];
+			::memcpy(newBuffer, m_buffer, static_cast<size_t>(m_size));
+
+			delete [] m_buffer;
+			m_buffer = newBuffer;
+		}
+
+		::memcpy_s(m_buffer + m_offset, static_cast<size_t>(m_capacity - m_offset), pv, cb);
+		m_offset += cb;
+		m_size = m_size < m_offset ? m_offset : m_size;
+
+		if (pcbWritten)
+		{
+			*pcbWritten = cb;
+		}
+
+		return S_OK;
+    }
+
+	// IStream
+
+    virtual HRESULT STDMETHODCALLTYPE SetSize(ULARGE_INTEGER)
+    { 
+        return E_NOTIMPL;   
+    }
+    
+    virtual HRESULT STDMETHODCALLTYPE CopyTo(IStream*, ULARGE_INTEGER, ULARGE_INTEGER*,
+        ULARGE_INTEGER*) 
+    { 
+        return E_NOTIMPL;   
+    }
+    
+    virtual HRESULT STDMETHODCALLTYPE Commit(DWORD)                                      
+    { 
+        return E_NOTIMPL;   
+    }
+    
+    virtual HRESULT STDMETHODCALLTYPE Revert(void)                                       
+    { 
+        return E_NOTIMPL;   
+    }
+    
+    virtual HRESULT STDMETHODCALLTYPE LockRegion(ULARGE_INTEGER, ULARGE_INTEGER, DWORD)              
+    { 
+        return E_NOTIMPL;   
+    }
+    
+    virtual HRESULT STDMETHODCALLTYPE UnlockRegion(ULARGE_INTEGER, ULARGE_INTEGER, DWORD)            
+    { 
+        return E_NOTIMPL;   
+    }
+    
+    virtual HRESULT STDMETHODCALLTYPE Clone(IStream **)                                  
+    { 
+        return E_NOTIMPL;   
+    }
+
+    virtual HRESULT STDMETHODCALLTYPE Seek(LARGE_INTEGER liDistanceToMove, DWORD dwOrigin,
+        ULARGE_INTEGER* lpNewFilePointer)
+    { 
+        switch(dwOrigin)
+        {
+			case STREAM_SEEK_SET:
+			{
+				if ((liDistanceToMove.QuadPart < 0) || (liDistanceToMove.QuadPart > m_size))
+				{
+					return STG_E_INVALIDFUNCTION;
+				}
+
+				m_offset = liDistanceToMove.QuadPart;
+			}
+			break;
+
+			case STREAM_SEEK_CUR:
+			{
+				if (((m_offset + liDistanceToMove.QuadPart) < 0) || (m_offset + liDistanceToMove.QuadPart) > m_size)
+				{
+					return STG_E_INVALIDFUNCTION;
+				}
+
+				m_offset += liDistanceToMove.QuadPart;
+			}
+			break;
+
+			case STREAM_SEEK_END:
+			{
+				if ((liDistanceToMove.QuadPart > 0) || (liDistanceToMove.QuadPart < -m_size))
+				{
+					return STG_E_INVALIDFUNCTION;
+				}
+
+				m_offset = m_size + liDistanceToMove.QuadPart;
+			}
+			break;
+
+			default: return STG_E_INVALIDFUNCTION;
+        }
+
+		if (lpNewFilePointer)
+		{
+			lpNewFilePointer->QuadPart = m_offset;
+		}
+
+        return S_OK;
+    }
+
+    virtual HRESULT STDMETHODCALLTYPE Stat(STATSTG* pStatstg, DWORD grfStatFlag) 
+    {
+        return S_OK;
+    }
+
+	unsigned char* releaseBuffer(size_t& size)
+	{
+		unsigned char* buffer = m_buffer;
+		size = static_cast<size_t>(m_size);
+
+		m_buffer = 0;
+		m_offset = 0;
+		m_size = 0;
+		m_capacity = 0;
+
+		return buffer;
+	}
+
+private:
+	unsigned char* m_buffer;
+	LONGLONG m_offset;
+	LONGLONG m_size;
+	LONGLONG m_capacity;
+};
+
+void HttpServer::processCover(Client& client)
+{
+	int i = 0;
+
+	if (!client.m_cover)
+	{
+		Gdiplus::GdiplusStartupInput gdiplusStartupInput;
+		ULONG_PTR gdiplusToken;
+		Gdiplus::GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
+		MemoryStream stream;
+
+		{
+			RECT rect;
+			HDC srcdc,destdc, windc;
+			HBITMAP src, dest, oldsrc, olddest;
+			HWND hwnd = Notify::window();
+
+			::GetWindowRect(hwnd, &rect);
+
+			srcdc = ::CreateCompatibleDC(0);
+			destdc = ::CreateCompatibleDC(0);
+
+			windc = ::GetDC(hwnd);
+			{
+				src = ::CreateCompatibleBitmap(windc, rect.right - rect.left, rect.bottom - rect.top);
+				dest = ::CreateCompatibleBitmap(windc, 234, 234); // TODO: clip width, height
+				oldsrc = (HBITMAP)::SelectObject(srcdc, src);
+				olddest = (HBITMAP)::SelectObject(destdc, dest);
+				::PrintWindow(hwnd, srcdc, 0);
+			}
+			::ReleaseDC(hwnd, windc);
+
+			::BitBlt(destdc, 0, 0, 234, 234, srcdc, 0, rect.bottom - 275, SRCCOPY);
+
+			Gdiplus::Bitmap bitmap(dest, NULL);
+			CLSID clsid;
+			GetEncoderClsid(L"image/png", &clsid);
+			bitmap.Save(&stream, &clsid);
+
+			::SelectObject(srcdc, oldsrc);
+			::SelectObject(destdc, olddest);
+
+			DeleteObject(srcdc);
+			DeleteObject(destdc);
+
+			DeleteObject(src);
+			DeleteObject(dest);
+		}
+
+		Gdiplus::GdiplusShutdown(gdiplusToken);
+
+		client.m_cover = reinterpret_cast<char*>(stream.releaseBuffer(client.m_coverSize));
+		if (!client.m_cover || !client.m_coverSize)
+		{
+			client.m_state = Close;
+		}
+	}
+
+	do
+	{
+		if (client.m_bufferOffset != client.m_bufferSize)
+		{
+			break;
+		}
+
+		if (client.m_coverOffset == client.m_coverSize)
+		{
+			client.m_state = Close;
+			break;
+		}
+
+		size_t maxCopy = (client.m_coverSize - client.m_coverOffset) > sizeof(client.m_buffer) ? sizeof(client.m_buffer) : (client.m_coverSize - client.m_coverOffset);
+
+		::memcpy_s(client.m_buffer, sizeof(client.m_buffer), client.m_cover + client.m_coverOffset, maxCopy);
+
+		client.m_bufferOffset = 0;
+		client.m_bufferSize = maxCopy;
+		client.m_coverOffset += maxCopy;
+	}
+	while (0);
 }
 
 }

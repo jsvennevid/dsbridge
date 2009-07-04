@@ -29,7 +29,6 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #if !defined(dsbridge_DllInterface_h)
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <audiodefs.h>
 #include <dsound.h>
