@@ -28,14 +28,45 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
+#include <windows.h>
+
 namespace dsbridge
 {
 
 class Configuration
 {
 public:
-	const char* getString(const char* name, const char* defaultValue = "");
+
+	static const char* getString(const char* name, const char* defaultValue = "");
 	static int getInteger(const char* name, int defaultValue = 0);
+
+private:
+
+	enum
+	{
+		PathLength = MAX_PATH
+	};
+
+	struct Setting
+	{
+		char* name;
+		char* value;
+	};
+
+	Configuration();
+	~Configuration();
+
+	const char* getStringInternal(const char* name, const char* defaultValue = "");
+	int getIntegerInternal(const char* name, int defaultValue = 0);
+	void loadSettings(const char* section);
+
+	char m_module[PathLength + 1];
+
+	Setting* m_settings;
+	size_t m_settingsCount;
+
+	static Configuration s_instance;
+	static CRITICAL_SECTION s_cs;
 };
 
 }

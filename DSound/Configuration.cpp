@@ -30,14 +30,240 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace dsbridge
 {
 
+Configuration Configuration::s_instance;
+CRITICAL_SECTION Configuration::s_cs;
+
+Configuration::Configuration()
+: m_settings(0)
+, m_settingsCount(0)
+{
+	::InitializeCriticalSection(&s_cs);
+
+	DWORD length = ::GetModuleFileName(0, m_module, PathLength);
+	m_module[length] = '\0';
+
+	char* offset = ::strrchr(m_module, '\\');
+	if (!offset)
+	{
+		m_module[0] = '\0';
+		return;
+	}
+
+	size_t ofslen = ::strlen(offset+1);
+	::memmove(m_module, offset+1, ofslen+1);
+	for (size_t i = 0; i < ofslen; ++i)
+	{
+		m_module[i] = ::toupper(m_module[i]);
+	}
+
+	loadSettings("SPOTIFY.EXE");
+//	loadSettings(m_module);
+}
+
+Configuration::~Configuration()
+{
+	::DeleteCriticalSection(&s_cs);
+}
+
 const char* Configuration::getString(const char* name, const char* defaultValue)
 {
-	return defaultValue;
+	const char* value;
+
+	::EnterCriticalSection(&s_cs);
+	do
+	{
+		value = s_instance.getStringInternal(name, defaultValue);
+	}
+	while (0);
+	::LeaveCriticalSection(&s_cs);
+
+	return value;
 }
 
 int Configuration::getInteger(const char* name, int defaultValue)
 {
+	int value;
+
+	::EnterCriticalSection(&s_cs);
+	do
+	{
+		value = s_instance.getIntegerInternal(name, defaultValue);
+	}
+	while (0);
+	::LeaveCriticalSection(&s_cs);
+
+	return value;
+}
+
+const char* Configuration::getStringInternal(const char* name, const char* defaultValue)
+{
+	for (unsigned int i = 0; i < m_settingsCount; ++i)
+	{
+		const Setting& setting = m_settings[i];
+
+		if (::_stricmp(setting.name, name))
+		{
+			continue;
+		}
+
+		return setting.value;
+	}
+
 	return defaultValue;
+}
+
+int Configuration::getIntegerInternal(const char* name, int defaultValue)
+{
+	const char* intValue = getStringInternal(name, 0);
+	if (!intValue)
+	{
+		return defaultValue;
+	}
+
+	int value = ::strtol(intValue, 0, 10);
+
+	return value;
+}
+
+void Configuration::loadSettings(const char* section)
+{
+	HANDLE file = INVALID_HANDLE_VALUE;
+	const int bufferSize = 8192;
+	char* buffer = new char[bufferSize];
+	enum
+	{
+		SearchingForSection,
+		ParsingSection
+	} state = SearchingForSection;
+
+	do
+	{
+		file = ::CreateFile("dsbridge.ini", GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+		int apa = GetLastError();
+		if (file == INVALID_HANDLE_VALUE)
+		{
+			break;
+		}
+
+		char* start = buffer;
+		const char* begin = buffer;
+		const char* end = buffer;
+		for (;;)
+		{
+			if (begin == end)
+			{
+				DWORD readCount;
+				if (!ReadFile(file, start, static_cast<DWORD>(bufferSize - (start - buffer)), &readCount, 0))
+				{
+					break;
+				}
+
+				if (!readCount)
+				{
+					break;
+				}
+
+				MessageBox(0, start, "apa", MB_OK);
+
+				begin = start;
+				end = start + readCount;
+				start = buffer;
+			}
+
+			const char* eol = begin;
+			while ((eol != end) && (*eol != '\r') && (*eol != '\n')) ++eol;
+
+			if (eol == end)
+			{
+				// TODO: add logic to refill section
+			}
+
+			switch (state)
+			{
+				case SearchingForSection:
+				{
+					size_t len = ::strlen(section);
+					if ((*begin != '[') || (((eol-1)-(begin+1)) != len) || (*(eol-1) != ']') || ::_strnicmp(begin+1, section, len))
+					{
+						break;
+					}
+
+					state = ParsingSection;
+				}
+				break;
+
+				case ParsingSection:
+				{
+					const char* nameBegin = begin;
+					const char* nameEnd = begin;
+
+					while ((nameEnd != eol) && (*nameEnd != '=')) ++nameEnd;
+					if (nameEnd == eol)
+					{
+						break;
+					}
+
+					if (*nameBegin == '[')
+					{
+						state = SearchingForSection;
+						break;
+					}
+
+					const char* valueBegin = nameEnd+1;
+
+					while ((valueBegin != eol) && (*valueBegin == ' ')) ++valueBegin;
+					const char* valueEnd = eol;
+					while ((valueEnd > (valueBegin+1)) && (*valueEnd == ' ')) --valueEnd;
+
+					if (*valueBegin == '"')
+					{
+						if (*(valueEnd-1) != '"')
+						{
+							break;
+						}
+
+						++valueBegin;
+						--valueEnd;
+
+						if (valueBegin > valueEnd)
+						{
+							break;
+						}
+					}
+
+					Setting temp;
+
+					temp.name = new char[(nameEnd-nameBegin)+1];
+					::memcpy(temp.name, nameBegin, (nameEnd-nameBegin));
+					temp.name[(nameEnd-nameBegin)] = '\0';
+
+					temp.value = new char[(valueEnd-valueBegin)+1];
+					::memcpy(temp.value, valueBegin, (valueEnd-valueBegin));
+					temp.value[(valueEnd-valueBegin)] = '\0';
+
+					Setting* curr = new Setting[m_settingsCount+1];
+					::memcpy_s(curr, sizeof(Setting) * (m_settingsCount+1), m_settings, sizeof(Setting) * m_settingsCount);
+					curr[m_settingsCount] = temp;
+
+					delete [] m_settings;
+					m_settings = curr;
+					++m_settingsCount;
+				}
+				break;
+			}
+
+			begin = eol;
+			while ((begin != end) && ((*begin == '\r') || (*begin == '\n'))) ++begin;
+		}
+	}
+	while (0);
+
+	delete [] buffer;
+	
+	if (file != INVALID_HANDLE_VALUE)
+	{
+		CloseHandle(file);
+	}
 }
 
 }
