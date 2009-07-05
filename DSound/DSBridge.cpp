@@ -64,7 +64,6 @@ typedef HRESULT (WINAPI *DSCaptureCreate8)(LPCGUID pcGuidDevice, LPDIRECTSOUNDCA
 
 HttpServer g_httpServer;
 Encoder g_encoder;
-Configuration g_configuration;
 
 static LPVOID getDSProc(const char* name)
 {

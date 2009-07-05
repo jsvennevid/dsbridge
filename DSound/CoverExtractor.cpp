@@ -1,4 +1,32 @@
+/*
+
+Copyright 2009 Jesper Svennevid
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+*/
+
 #include "CoverExtractor.h"
+#include "Configuration.h"
 
 #include <gdiplus.h>
 
@@ -11,6 +39,11 @@ CoverExtractor::Cover* CoverExtractor::getCoverImage(HWND hWnd)
 	{
 		return 0;
 	}
+
+	static int coverArtX = Configuration::getInteger("CoverArtX");
+	static int coverArtY = Configuration::getInteger("CoverArtY");
+	static int coverArtWidth = Configuration::getInteger("CoverArtWidth", 256);
+	static int coverArtHeight = Configuration::getInteger("CoverArtHeight", 256);
 
 	MemoryStream stream;
 	WindowState oldState = showWindow(hWnd);
@@ -32,14 +65,17 @@ CoverExtractor::Cover* CoverExtractor::getCoverImage(HWND hWnd)
 			windc = ::GetDC(hWnd);
 			{
 				src = ::CreateCompatibleBitmap(windc, rect.right - rect.left, rect.bottom - rect.top);
-				dest = ::CreateCompatibleBitmap(windc, 234, 234); // TODO: clip width, height
+				dest = ::CreateCompatibleBitmap(windc, coverArtWidth, coverArtHeight);
 				oldsrc = (HBITMAP)::SelectObject(srcdc, src);
 				olddest = (HBITMAP)::SelectObject(destdc, dest);
 				::PrintWindow(hWnd, srcdc, 0);
 			}
 			::ReleaseDC(hWnd, windc);
 
-			::BitBlt(destdc, 0, 0, 234, 234, srcdc, 0, (rect.bottom-rect.top) - 275, SRCCOPY);
+			int posX = coverArtX >= 0 ? coverArtX : (rect.right - rect.left) + coverArtX;
+			int posY = coverArtY >= 0 ? coverArtY : (rect.bottom - rect.top) + coverArtY;
+
+			::BitBlt(destdc, 0, 0, coverArtWidth, coverArtHeight, srcdc, posX, posY, SRCCOPY);
 
 			Gdiplus::Bitmap bitmap(dest, NULL);
 			CLSID clsid;

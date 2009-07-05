@@ -138,7 +138,7 @@ bool HttpServer::initialize()
 	SOCKADDR_IN saddr;
 	saddr.sin_family = AF_INET;
 	saddr.sin_addr.S_un.S_addr = INADDR_ANY;
-	saddr.sin_port = htons(m_port = Configuration::getInteger("ListenPort", 8124));
+	saddr.sin_port = htons(m_port = Configuration::getInteger("HTTPPort", 8124));
 	if (::bind(m_socket, reinterpret_cast<SOCKADDR*>(&saddr), sizeof(saddr)) < 0)
 	{
 		Notify::update(Notify::HttpServer, Notify::Error, "Could not bind to port %d", m_port);
@@ -400,11 +400,13 @@ void HttpServer::processHeader(Client& client)
 				const char* uriEnd = uriBegin;
 				while ((uriEnd != eol) && (*uriEnd != ' ')) ++uriEnd;
 
+				static int coverArtEnabled = Configuration::getInteger("CoverArt");
+
 				if ((uriEnd != eol) && ((uriEnd-uriBegin) == 1) && !::_strnicmp(uriBegin, "/", 1))
 				{
 					clientState = Streaming;
 				}
-				else if ((uriEnd != eol) && ((uriEnd-uriBegin) >= 6) && !::_strnicmp(uriBegin, "/cover", 6))
+				else if ((uriEnd != eol) && ((uriEnd-uriBegin) >= 6) && !::_strnicmp(uriBegin, "/cover", 6) && coverArtEnabled)
 				{
 					clientState = Cover;
 				}
@@ -540,10 +542,18 @@ void HttpServer::processStreaming(Client& client)
 
 		char* buf = client.m_buffer+1;
 		size_t bufsize = sizeof(client.m_buffer)-1;
+		static int coverArtEnabled = Configuration::getInteger("CoverArt");
 		if (newHash != client.m_titleHash)
 		{
-			sprintf_s(buf, bufsize, "StreamTitle='%s';", windowTitle);
-			client.m_sendCover = Notify::window() && ::strlen(client.m_host) > 0;
+			const char* activeTitle = windowTitle;
+			static const char* titlePrefix = Configuration::getString("TitlePrefix");
+			if (!::_strnicmp(activeTitle, titlePrefix, ::strlen(titlePrefix)))
+			{
+				activeTitle += ::strlen(titlePrefix);
+			}
+
+			sprintf_s(buf, bufsize, "StreamTitle='%s';", activeTitle);
+			client.m_sendCover = Notify::window() && (::strlen(client.m_host) > 0) && coverArtEnabled;
 		}
 		else if (client.m_sendCover)
 		{
