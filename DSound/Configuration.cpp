@@ -163,8 +163,6 @@ void Configuration::loadSettings(const char* section)
 					break;
 				}
 
-				MessageBox(0, start, "apa", MB_OK);
-
 				begin = start;
 				end = start + readCount;
 				start = buffer;
