@@ -545,11 +545,22 @@ void HttpServer::processStreaming(Client& client)
 		static int coverArtEnabled = Configuration::getInteger("CoverArt");
 		if (newHash != client.m_titleHash)
 		{
-			const char* activeTitle = windowTitle;
+			char* activeTitle = windowTitle;
 			static const char* titlePrefix = Configuration::getString("TitlePrefix");
 			if (!::_strnicmp(activeTitle, titlePrefix, ::strlen(titlePrefix)))
 			{
 				activeTitle += ::strlen(titlePrefix);
+			}
+
+			for (size_t i = 0, n = ::strlen(activeTitle); i < n; ++i)
+			{
+				char& c = activeTitle[i];
+
+				switch (c)
+				{
+					case -106: c = '-'; break;
+					case -107: c = '-'; break;
+				}
 			}
 
 			sprintf_s(buf, bufsize, "StreamTitle='%s';", activeTitle);
