@@ -29,6 +29,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #include "RingBuffer.h"
+#include "CoverExtractor.h"
 
 #include <windows.h>
 
@@ -69,7 +70,6 @@ private:
 		, m_metaData(false)
 		, m_cover(0)
 		, m_coverOffset(0)
-		, m_coverSize(0)
 		, m_titleHash(0)
 		, m_sendCover(false)
 		{
@@ -85,9 +85,8 @@ private:
 		size_t m_metaOffset;
 		bool m_metaData;
 
-		char* m_cover;
+		CoverExtractor::Cover* m_cover;
 		size_t m_coverOffset;
-		size_t m_coverSize;
 
 		unsigned int m_titleHash;
 		bool m_sendCover;

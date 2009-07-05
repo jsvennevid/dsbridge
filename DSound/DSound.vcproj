@@ -183,6 +183,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\CoverExtractor.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\DirectSound.cpp"
 				>
 			</File>
@@ -230,6 +234,10 @@
 			>
 			<File
 				RelativePath=".\Configuration.h"
+				>
+			</File>
+			<File
+				RelativePath=".\CoverExtractor.h"
 				>
 			</File>
 			<File

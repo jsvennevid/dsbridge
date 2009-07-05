@@ -31,7 +31,6 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "Configuration.h"
 
 #include <windows.h>
-#include <gdiplus.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -320,7 +319,7 @@ bool HttpServer::run()
 			continue;
 		}
 
-		delete [] client.m_cover;
+		delete client.m_cover;
 
 		::closesocket(client.m_socket);
 
@@ -602,285 +601,14 @@ unsigned int HttpServer::hash(const char* str, size_t length)
 	return hash;
 }
 
-int GetEncoderClsid(const WCHAR* format, CLSID* pClsid)
-{
-	using namespace Gdiplus;
-	UINT  num = 0;          // number of image encoders
-	UINT  size = 0;         // size of the image encoder array in bytes
-
-	ImageCodecInfo* pImageCodecInfo = NULL;
-
-	GetImageEncodersSize(&num, &size);
-	if(size == 0)
-	return -1;  // Failure
-
-	pImageCodecInfo = (ImageCodecInfo*)(malloc(size));
-	if(pImageCodecInfo == NULL)
-	return -1;  // Failure
-
-	GetImageEncoders(num, size, pImageCodecInfo);
-
-	for(UINT j = 0; j < num; ++j)
-	{
-		if( wcscmp(pImageCodecInfo[j].MimeType, format) == 0 )
-		{
-			*pClsid = pImageCodecInfo[j].Clsid;
-			free(pImageCodecInfo);
-			return j;  // Success
-		}
-	}
-
-	free(pImageCodecInfo);
-	return 0;
-}
-
-class MemoryStream : public ::IStream
-{
-public:
-	MemoryStream()
-	: m_buffer(0)
-	, m_offset(0)
-	, m_size(0)
-	, m_capacity(0)
-	{}
-
-	~MemoryStream()
-	{
-		delete [] m_buffer;
-	}
-
-	// IUnknown
-
-    virtual HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void ** ppvObject)
-    { 
-        if (iid == __uuidof(IUnknown)
-            || iid == __uuidof(IStream)
-            || iid == __uuidof(ISequentialStream))
-        {
-            *ppvObject = static_cast<IStream*>(this);
-            AddRef();
-            return S_OK;
-        } else
-            return E_NOINTERFACE; 
-    }
-
-    virtual ULONG STDMETHODCALLTYPE AddRef(void) 
-    { 
-		return 1;
-    }
-
-    virtual ULONG STDMETHODCALLTYPE Release(void) 
-    {
-		return 1;
-    }
-
-	// ISequentialStream
-
-    virtual HRESULT STDMETHODCALLTYPE Read(void* pv, ULONG cb, ULONG* pcbRead)
-    {
-		ULONG maxRead = static_cast<ULONG>(cb > (m_size - m_offset) ? (m_size - m_offset) : cb);
-
-		::memcpy_s(pv, cb, m_buffer, maxRead);
-		m_offset += maxRead;
-
-		if (pcbRead)
-		{
-			*pcbRead = maxRead;
-		}
-
-		return S_OK;
-    }
-
-    virtual HRESULT STDMETHODCALLTYPE Write(void const* pv, ULONG cb, ULONG* pcbWritten)
-    {
-		ULONG maxWrite = static_cast<ULONG>(cb > (m_capacity - m_offset) ? (m_capacity - m_offset) : cb);
-		if (maxWrite != cb)
-		{
-			m_capacity = m_size + cb * 2;
-			unsigned char* newBuffer = new unsigned char[static_cast<size_t>(m_capacity)];
-			::memcpy(newBuffer, m_buffer, static_cast<size_t>(m_size));
-
-			delete [] m_buffer;
-			m_buffer = newBuffer;
-		}
-
-		::memcpy_s(m_buffer + m_offset, static_cast<size_t>(m_capacity - m_offset), pv, cb);
-		m_offset += cb;
-		m_size = m_size < m_offset ? m_offset : m_size;
-
-		if (pcbWritten)
-		{
-			*pcbWritten = cb;
-		}
-
-		return S_OK;
-    }
-
-	// IStream
-
-    virtual HRESULT STDMETHODCALLTYPE SetSize(ULARGE_INTEGER)
-    { 
-        return E_NOTIMPL;   
-    }
-    
-    virtual HRESULT STDMETHODCALLTYPE CopyTo(IStream*, ULARGE_INTEGER, ULARGE_INTEGER*,
-        ULARGE_INTEGER*) 
-    { 
-        return E_NOTIMPL;   
-    }
-    
-    virtual HRESULT STDMETHODCALLTYPE Commit(DWORD)                                      
-    { 
-        return E_NOTIMPL;   
-    }
-    
-    virtual HRESULT STDMETHODCALLTYPE Revert(void)                                       
-    { 
-        return E_NOTIMPL;   
-    }
-    
-    virtual HRESULT STDMETHODCALLTYPE LockRegion(ULARGE_INTEGER, ULARGE_INTEGER, DWORD)              
-    { 
-        return E_NOTIMPL;   
-    }
-    
-    virtual HRESULT STDMETHODCALLTYPE UnlockRegion(ULARGE_INTEGER, ULARGE_INTEGER, DWORD)            
-    { 
-        return E_NOTIMPL;   
-    }
-    
-    virtual HRESULT STDMETHODCALLTYPE Clone(IStream **)                                  
-    { 
-        return E_NOTIMPL;   
-    }
-
-    virtual HRESULT STDMETHODCALLTYPE Seek(LARGE_INTEGER liDistanceToMove, DWORD dwOrigin,
-        ULARGE_INTEGER* lpNewFilePointer)
-    { 
-        switch(dwOrigin)
-        {
-			case STREAM_SEEK_SET:
-			{
-				if ((liDistanceToMove.QuadPart < 0) || (liDistanceToMove.QuadPart > m_size))
-				{
-					return STG_E_INVALIDFUNCTION;
-				}
-
-				m_offset = liDistanceToMove.QuadPart;
-			}
-			break;
-
-			case STREAM_SEEK_CUR:
-			{
-				if (((m_offset + liDistanceToMove.QuadPart) < 0) || (m_offset + liDistanceToMove.QuadPart) > m_size)
-				{
-					return STG_E_INVALIDFUNCTION;
-				}
-
-				m_offset += liDistanceToMove.QuadPart;
-			}
-			break;
-
-			case STREAM_SEEK_END:
-			{
-				if ((liDistanceToMove.QuadPart > 0) || (liDistanceToMove.QuadPart < -m_size))
-				{
-					return STG_E_INVALIDFUNCTION;
-				}
-
-				m_offset = m_size + liDistanceToMove.QuadPart;
-			}
-			break;
-
-			default: return STG_E_INVALIDFUNCTION;
-        }
-
-		if (lpNewFilePointer)
-		{
-			lpNewFilePointer->QuadPart = m_offset;
-		}
-
-        return S_OK;
-    }
-
-    virtual HRESULT STDMETHODCALLTYPE Stat(STATSTG* pStatstg, DWORD grfStatFlag) 
-    {
-        return S_OK;
-    }
-
-	unsigned char* releaseBuffer(size_t& size)
-	{
-		unsigned char* buffer = m_buffer;
-		size = static_cast<size_t>(m_size);
-
-		m_buffer = 0;
-		m_offset = 0;
-		m_size = 0;
-		m_capacity = 0;
-
-		return buffer;
-	}
-
-private:
-	unsigned char* m_buffer;
-	LONGLONG m_offset;
-	LONGLONG m_size;
-	LONGLONG m_capacity;
-};
-
 void HttpServer::processCover(Client& client)
 {
 	int i = 0;
 
 	if (!client.m_cover)
 	{
-		Gdiplus::GdiplusStartupInput gdiplusStartupInput;
-		ULONG_PTR gdiplusToken;
-		Gdiplus::GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
-		MemoryStream stream;
-
-		{
-			RECT rect;
-			HDC srcdc,destdc, windc;
-			HBITMAP src, dest, oldsrc, olddest;
-			HWND hwnd = Notify::window();
-
-			::GetWindowRect(hwnd, &rect);
-
-			srcdc = ::CreateCompatibleDC(0);
-			destdc = ::CreateCompatibleDC(0);
-
-			windc = ::GetDC(hwnd);
-			{
-				src = ::CreateCompatibleBitmap(windc, rect.right - rect.left, rect.bottom - rect.top);
-				dest = ::CreateCompatibleBitmap(windc, 234, 234); // TODO: clip width, height
-				oldsrc = (HBITMAP)::SelectObject(srcdc, src);
-				olddest = (HBITMAP)::SelectObject(destdc, dest);
-				::PrintWindow(hwnd, srcdc, 0);
-			}
-			::ReleaseDC(hwnd, windc);
-
-			::BitBlt(destdc, 0, 0, 234, 234, srcdc, 0, rect.bottom - 275, SRCCOPY);
-
-			Gdiplus::Bitmap bitmap(dest, NULL);
-			CLSID clsid;
-			GetEncoderClsid(L"image/png", &clsid);
-			bitmap.Save(&stream, &clsid);
-
-			::SelectObject(srcdc, oldsrc);
-			::SelectObject(destdc, olddest);
-
-			DeleteObject(srcdc);
-			DeleteObject(destdc);
-
-			DeleteObject(src);
-			DeleteObject(dest);
-		}
-
-		Gdiplus::GdiplusShutdown(gdiplusToken);
-
-		client.m_cover = reinterpret_cast<char*>(stream.releaseBuffer(client.m_coverSize));
-		if (!client.m_cover || !client.m_coverSize)
+		client.m_cover = CoverExtractor::getCoverImage(Notify::window());
+		if (!client.m_cover)
 		{
 			client.m_state = Close;
 		}
@@ -893,15 +621,15 @@ void HttpServer::processCover(Client& client)
 			break;
 		}
 
-		if (client.m_coverOffset == client.m_coverSize)
+		if (client.m_coverOffset == client.m_cover->length)
 		{
 			client.m_state = Close;
 			break;
 		}
 
-		size_t maxCopy = (client.m_coverSize - client.m_coverOffset) > sizeof(client.m_buffer) ? sizeof(client.m_buffer) : (client.m_coverSize - client.m_coverOffset);
+		size_t maxCopy = (client.m_cover->length - client.m_coverOffset) > sizeof(client.m_buffer) ? sizeof(client.m_buffer) : (client.m_cover->length - client.m_coverOffset);
 
-		::memcpy_s(client.m_buffer, sizeof(client.m_buffer), client.m_cover + client.m_coverOffset, maxCopy);
+		::memcpy_s(client.m_buffer, sizeof(client.m_buffer), client.m_cover->image + client.m_coverOffset, maxCopy);
 
 		client.m_bufferOffset = 0;
 		client.m_bufferSize = maxCopy;
