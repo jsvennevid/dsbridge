@@ -33,10 +33,12 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace dsbridge
 {
 
+extern Encoder g_encoder;
+
 class DirectSoundBuffer : public IDirectSoundBuffer
 {
 public:
-	DirectSoundBuffer(LPDIRECTSOUNDBUFFER dsb);
+	DirectSoundBuffer(LPDIRECTSOUNDBUFFER dsb, const DSBCAPS& caps);
 	~DirectSoundBuffer();
 
     virtual HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, LPVOID *);
@@ -88,7 +90,7 @@ private:
 
 extern Encoder g_encoder;
 
-DirectSoundBuffer::DirectSoundBuffer(LPDIRECTSOUNDBUFFER dsb)
+DirectSoundBuffer::DirectSoundBuffer(LPDIRECTSOUNDBUFFER dsb, const DSBCAPS& caps)
 : m_dsb(dsb)
 , m_format(0)
 , m_formatSize(0)
@@ -118,6 +120,8 @@ DirectSoundBuffer::DirectSoundBuffer(LPDIRECTSOUNDBUFFER dsb)
 		g_encoder.setFormat(m_format);
 	}
 	while (0);
+
+	g_encoder.onCreate(caps.dwBufferBytes);
 }
 
 DirectSoundBuffer::~DirectSoundBuffer()
@@ -233,7 +237,17 @@ HRESULT STDMETHODCALLTYPE DirectSoundBuffer::Lock(DWORD dwOffset, DWORD dwBytes,
 
 HRESULT STDMETHODCALLTYPE DirectSoundBuffer::Play(DWORD dwReserved1, DWORD dwPriority, DWORD dwFlags)
 {
-	return m_dsb->Play(dwReserved1, dwPriority, dwFlags);
+	HRESULT result = m_dsb->Play(dwReserved1, dwPriority, dwFlags);
+	if (FAILED(result))
+	{
+		return result;
+	}
+
+	DWORD position;
+	m_dsb->GetCurrentPosition(&position, 0);
+	g_encoder.onPlay(position);
+
+	return result;
 }
 
 HRESULT STDMETHODCALLTYPE DirectSoundBuffer::SetCurrentPosition(DWORD dwNewPosition)
@@ -264,7 +278,17 @@ HRESULT STDMETHODCALLTYPE DirectSoundBuffer::SetFrequency(DWORD dwFrequency)
 
 HRESULT STDMETHODCALLTYPE DirectSoundBuffer::Stop()
 {
-	return m_dsb->Stop();
+	HRESULT result = m_dsb->Stop();
+	if (FAILED(result))
+	{
+		return result;
+	}
+
+	DWORD position;
+	m_dsb->GetCurrentPosition(&position, 0);
+	g_encoder.onStop(position);
+
+	return result;
 }
 
 HRESULT STDMETHODCALLTYPE DirectSoundBuffer::Unlock(LPVOID pvAudioPtr1, DWORD dwAudioBytes1, LPVOID pvAudioPtr2, DWORD dwAudioBytes2)
@@ -293,6 +317,10 @@ HRESULT STDMETHODCALLTYPE DirectSoundBuffer::Unlock(LPVOID pvAudioPtr1, DWORD dw
 
 	m_physical1 = m_physical2 = BufferInfo();
 
+	DWORD position;
+	m_dsb->GetCurrentPosition(&position, 0);
+	g_encoder.onUpdate(position);
+
 	return hr;
 }
 
@@ -303,7 +331,14 @@ HRESULT STDMETHODCALLTYPE DirectSoundBuffer::Restore()
 
 LPDIRECTSOUNDBUFFER createWrapper(LPDIRECTSOUNDBUFFER dsb)
 {
-	return reinterpret_cast<LPDIRECTSOUNDBUFFER>(new DirectSoundBuffer(dsb));
+	DSBCAPS caps;
+	caps.dwSize = sizeof(caps);
+	if (FAILED(dsb->GetCaps(&caps)))
+	{
+		return 0;
+	}
+
+	return reinterpret_cast<LPDIRECTSOUNDBUFFER>(new DirectSoundBuffer(dsb, caps));
 }
 
 }

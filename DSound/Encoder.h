@@ -50,11 +50,18 @@ public:
 	void setFormat(LPWAVEFORMATEX format);
 	void write(const void* buffer, size_t count);
 
+	void onCreate(DWORD bufferSize);
+	void onPlay(DWORD position);
+	void onStop(DWORD position);
+	void onUpdate(DWORD position);
+	void onDestroy();
+
 private:
 
 	static DWORD WINAPI threadEntry(LPVOID parameter);
 
 	bool run();
+	void updatePosition(DWORD position);
 
 	HMODULE m_module;
 	WAVEFORMATEX m_format;
@@ -70,6 +77,13 @@ private:
 	PBYTE m_inputBuffer;
 
 	RingBuffer m_buffer;
+
+	bool m_playing;
+	bool m_destroyed;
+	DWORD m_raw;
+	DWORD m_current;
+	DWORD m_goal;
+	DWORD m_bufferSize;
 };
 
 }

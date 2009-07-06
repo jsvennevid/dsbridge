@@ -39,6 +39,12 @@ namespace dsbridge
 extern HttpServer g_httpServer;
 
 Encoder::Encoder()
+: m_playing(false)
+, m_destroyed(false)
+, m_raw(0)
+, m_current(0)
+, m_goal(0)
+, m_bufferSize(0)
 {
 	InitializeCriticalSection(&m_cs);
 }
@@ -155,6 +161,92 @@ void Encoder::write(const void* buffer, size_t count)
 	LeaveCriticalSection(&m_cs);
 }
 
+void Encoder::onCreate(DWORD bufferSize)
+{
+	EnterCriticalSection(&m_cs);
+	do
+	{
+		m_playing = false;
+		m_destroyed = false;
+		m_raw = 0;
+		m_current = 0;
+		m_goal = 0;
+		m_bufferSize = bufferSize;
+	}
+	while (0);
+	LeaveCriticalSection(&m_cs);
+}
+
+void Encoder::onPlay(DWORD position)
+{
+	EnterCriticalSection(&m_cs);
+	do
+	{
+		m_playing = true;
+		updatePosition(position);
+	}
+	while (0);
+	LeaveCriticalSection(&m_cs);
+}
+
+void Encoder::onStop(DWORD position)
+{
+	EnterCriticalSection(&m_cs);
+	do
+	{
+		if (m_playing)
+		{
+			updatePosition(position);
+		}
+		m_playing = false;
+	}
+	while (0);
+	LeaveCriticalSection(&m_cs);
+
+	onDestroy();
+}
+
+void Encoder::onUpdate(DWORD position)
+{
+	EnterCriticalSection(&m_cs);
+	do
+	{
+		if (m_playing)
+		{
+			updatePosition(position);
+		}
+	}
+	while (0);
+	LeaveCriticalSection(&m_cs);
+}
+
+void Encoder::onDestroy()
+{
+	EnterCriticalSection(&m_cs);
+	do
+	{
+		m_destroyed = true;
+
+		// TODO: use a waitable object instead
+
+		while (m_buffer.written() > (m_goal - m_current))
+		{
+			LeaveCriticalSection(&m_cs);
+			SleepEx(10, TRUE);
+			EnterCriticalSection(&m_cs);
+		}
+
+		m_raw = 0;
+		m_goal -= m_current;
+		m_current = 0;
+
+		m_playing = false;
+		m_destroyed = false;
+	}
+	while (0);
+	LeaveCriticalSection(&m_cs);
+}
+
 DWORD WINAPI Encoder::threadEntry(LPVOID parameter)
 {
 	__try
@@ -177,20 +269,38 @@ DWORD WINAPI Encoder::threadEntry(LPVOID parameter)
 
 bool Encoder::run()
 {
-
 	for (;;)
 	{
 		bool done = false;
 		EnterCriticalSection(&m_cs);
 		do
 		{
-			if (m_buffer.written() / (2) < m_samples)
+			size_t readMax = (m_goal - m_current);
+			size_t readNeeded = m_samples * 2;
+			size_t readAvailable = m_buffer.written();
+
+			readAvailable = readMax < readAvailable ? readMax : readAvailable;
+
+			if (m_destroyed)
+			{
+				if (readAvailable < readNeeded)
+				{
+					m_buffer.discard(m_buffer.written() - readMax);
+					done = true;
+					break;
+				}
+			}
+
+
+			if (readAvailable < readNeeded)
 			{
 				done = true;
 				break;
 			}
 
-			m_buffer.read(m_inputBuffer, m_samples * 2);
+			m_buffer.read(m_inputBuffer, readNeeded);
+
+			m_current += readNeeded;
 		}
 		while (0);
 		LeaveCriticalSection(&m_cs);
@@ -218,6 +328,18 @@ bool Encoder::run()
 	}
 
 	return true;
+}
+
+void Encoder::updatePosition(DWORD position)
+{
+	DWORD actual = position;
+	if (position < m_raw)
+	{
+		actual += m_bufferSize;
+	}
+
+	m_goal += actual - m_raw;
+	m_raw = position;
 }
 
 }

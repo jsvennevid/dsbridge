@@ -25,6 +25,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
+#define _WIN32_WINNT 0x0501 // require Windows XP
+
 #include "CoverExtractor.h"
 #include "Configuration.h"
 

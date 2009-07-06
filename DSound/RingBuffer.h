@@ -49,6 +49,7 @@ public:
 	size_t read(void* buffer, size_t size);
 	size_t peek(void* buffer, size_t size, size_t offset = 0);
 	size_t seek(size_t size);
+	void discard(size_t size);
 private:
 	char* m_write;
 	char* m_read;

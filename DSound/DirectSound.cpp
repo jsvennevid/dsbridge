@@ -88,6 +88,11 @@ HRESULT STDMETHODCALLTYPE DirectSound::CreateSoundBuffer(LPCDSBUFFERDESC pcDSBuf
 	}
 
 	(*ppDSBuffer) = createWrapper(localBuffer);
+	if (!*ppDSBuffer)
+	{
+		localBuffer->Release();
+		return DSERR_OUTOFMEMORY;
+	}
 	return hr;
 }
 

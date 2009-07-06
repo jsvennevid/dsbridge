@@ -196,4 +196,22 @@ size_t RingBuffer::seek(size_t size)
 	return actual;
 }
 
+void RingBuffer::discard(size_t size)
+{
+	size_t maxDiscard = written();
+	size_t actual = size > maxDiscard ? maxDiscard : size;
+
+	if ((m_write <= m_read) && (actual > size_t(m_write - m_begin)))
+	{
+		size_t beginWrite = m_write - m_begin;
+		m_write = m_read + (actual - beginWrite);
+	}
+	else
+	{
+		m_write -= actual;
+	}
+
+	m_dataAvailable -= actual;
+}
+
 }
