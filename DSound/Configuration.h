@@ -58,9 +58,10 @@ private:
 
 	const char* getStringInternal(const char* name, const char* defaultValue = "");
 	int getIntegerInternal(const char* name, int defaultValue = 0);
-	void loadSettings(const char* section);
+	void loadSettings(const char* section, const char* path);
 
 	char m_module[PathLength + 1];
+	char m_path[PathLength+1];
 
 	Setting* m_settings;
 	size_t m_settingsCount;

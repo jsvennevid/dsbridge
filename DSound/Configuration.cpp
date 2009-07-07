@@ -27,6 +27,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "Configuration.h"
 
+#include <stdio.h>
+
 namespace dsbridge
 {
 
@@ -39,24 +41,28 @@ Configuration::Configuration()
 {
 	::InitializeCriticalSection(&s_cs);
 
-	DWORD length = ::GetModuleFileName(0, m_module, PathLength);
-	m_module[length] = '\0';
+	DWORD length = ::GetModuleFileName(0, m_path, PathLength);
+	m_path[length] = '\0';
 
-	char* offset = ::strrchr(m_module, '\\');
+	char* offset = ::strrchr(m_path, '\\');
 	if (!offset)
 	{
+		m_path[0] = '\0';
 		m_module[0] = '\0';
 		return;
 	}
 
 	size_t ofslen = ::strlen(offset+1);
-	::memmove(m_module, offset+1, ofslen+1);
+	::memcpy_s(m_module, sizeof(m_module), offset+1, ofslen+1);
+	*(offset+1) = '\0';
 	for (size_t i = 0; i < ofslen; ++i)
 	{
 		m_module[i] = ::toupper(m_module[i]);
 	}
 
-	loadSettings(m_module);
+	sprintf_s(m_path, sizeof(m_path), "%sdsbridge.ini", m_path);
+
+	loadSettings(m_module, m_path);
 }
 
 Configuration::~Configuration()
@@ -124,7 +130,7 @@ int Configuration::getIntegerInternal(const char* name, int defaultValue)
 	return value;
 }
 
-void Configuration::loadSettings(const char* section)
+void Configuration::loadSettings(const char* section, const char* path)
 {
 	HANDLE file = INVALID_HANDLE_VALUE;
 	const int bufferSize = 8192;
@@ -137,8 +143,8 @@ void Configuration::loadSettings(const char* section)
 
 	do
 	{
-		file = ::CreateFile("dsbridge.ini", GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
-		int apa = GetLastError();
+		file = ::CreateFile(path, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+		int apa2 = GetLastError();
 		if (file == INVALID_HANDLE_VALUE)
 		{
 			break;

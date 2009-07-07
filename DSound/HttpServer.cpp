@@ -128,6 +128,23 @@ DWORD WINAPI HttpServer::threadEntry(LPVOID parameters)
 
 bool HttpServer::initialize()
 {
+	int delayNetworking = Configuration::getInteger("DelayNetworking");
+	if (delayNetworking > 0)
+	{
+		SleepEx(delayNetworking, FALSE);
+	}
+
+	int initializeNetworking = Configuration::getInteger("InitializeNetworking");
+	if (initializeNetworking)
+	{
+		WSADATA data;
+		if (WSAStartup(MAKEWORD(2,2), &data))
+		{
+			Notify::update(Notify::HttpServer, Notify::Error, "Could not initialize networking");
+			return false;
+		}
+	}
+
 	m_socket = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (m_socket < 0)
 	{
