@@ -27,6 +27,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "DirectSoundBuffer.h"
 #include "Encoder.h"
+#include "HttpServer.h"
+#include "Configuration.h"
 
 #include <stdio.h>
 
@@ -157,7 +159,26 @@ HRESULT STDMETHODCALLTYPE DirectSoundBuffer::GetCaps(LPDSBCAPS pDSBufferCaps)
 
 HRESULT STDMETHODCALLTYPE DirectSoundBuffer::GetCurrentPosition(LPDWORD pdwCurrentPlayCursor, LPDWORD pdwCurrentWriteCursor)
 {
-	return m_dsb->GetCurrentPosition(pdwCurrentPlayCursor, pdwCurrentWriteCursor);
+	DWORD playCursor, writeCursor;
+	HRESULT hr = m_dsb->GetCurrentPosition(&playCursor, &writeCursor);
+	if (FAILED(hr))
+	{
+		return hr;
+	}
+
+	g_encoder.onUpdate(playCursor);
+
+	if (pdwCurrentPlayCursor)
+	{
+		*pdwCurrentPlayCursor = playCursor;
+	}
+
+	if (pdwCurrentWriteCursor)
+	{
+		*pdwCurrentWriteCursor = writeCursor;
+	}
+
+	return hr;
 }
 
 HRESULT STDMETHODCALLTYPE DirectSoundBuffer::GetFormat(LPWAVEFORMATEX pwfxFormat, DWORD dwSizeAllocated, LPDWORD pdwSizeWritten)
@@ -293,14 +314,31 @@ HRESULT STDMETHODCALLTYPE DirectSoundBuffer::Stop()
 
 HRESULT STDMETHODCALLTYPE DirectSoundBuffer::Unlock(LPVOID pvAudioPtr1, DWORD dwAudioBytes1, LPVOID pvAudioPtr2, DWORD dwAudioBytes2)
 {
+	static bool muteWhenStreaming = Configuration::getInteger("MuteWhenStreaming") > 0;
+	bool isStreaming = HttpServer::isStreaming();
+
 	if (pvAudioPtr1)
 	{
-		::memcpy(m_physical1.m_buffer, pvAudioPtr1, dwAudioBytes1);
+		if (muteWhenStreaming && isStreaming)
+		{
+			::memset(m_physical1.m_buffer, 0, dwAudioBytes1);
+		}
+		else
+		{
+			::memcpy(m_physical1.m_buffer, pvAudioPtr1, dwAudioBytes1);
+		}
 	}
 
 	if (pvAudioPtr2)
 	{
-		::memcpy(m_physical2.m_buffer, pvAudioPtr2, dwAudioBytes2);
+		if (muteWhenStreaming && isStreaming)
+		{
+			::memset(m_physical2.m_buffer, 0, dwAudioBytes2);
+		}
+		else
+		{
+			::memcpy(m_physical2.m_buffer, pvAudioPtr2, dwAudioBytes2);
+		}
 	}
 
 	HRESULT hr = m_dsb->Unlock(m_physical1.m_buffer, dwAudioBytes1, m_physical2.m_buffer, dwAudioBytes2);

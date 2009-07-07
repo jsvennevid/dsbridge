@@ -39,6 +39,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace dsbridge
 {
 
+volatile bool HttpServer::s_isStreaming = false;
+
 HttpServer::HttpServer()
 : m_thread(0)
 , m_socket(-1)
@@ -237,6 +239,7 @@ bool HttpServer::run()
 		return m_running;
 	}
 
+	bool isStreaming = false;
 	for (unsigned int i = 0; i < m_clientCount; ++i)
 	{
 		Client& client = m_clients[i];
@@ -285,6 +288,8 @@ bool HttpServer::run()
 
 			case Streaming:
 			{
+				isStreaming = true;
+
 				if (!FD_ISSET(client.m_socket, &wfds))
 				{
 					break;
@@ -343,6 +348,8 @@ bool HttpServer::run()
 		::memmove(&client, &client + 1, sizeof(Client) * (m_clientCount - (i+1)));
 		--m_clientCount;
 	}
+
+	s_isStreaming = isStreaming && (m_clientCount > 0);
 
 	if (FD_ISSET(m_socket, &rfds))
 	{

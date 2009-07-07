@@ -48,6 +48,7 @@ public:
 	short port() const;
 
 	void write(const void* buffer, size_t count);
+	static bool isStreaming() { return s_isStreaming; }
 
 private:
 
@@ -120,6 +121,8 @@ private:
 
 	time_t m_lastAnnounce;
 	int m_port;
+
+	static volatile bool s_isStreaming;
 
 	static const unsigned int s_metaSize = 45000;
 };
