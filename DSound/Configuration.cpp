@@ -56,8 +56,7 @@ Configuration::Configuration()
 		m_module[i] = ::toupper(m_module[i]);
 	}
 
-	loadSettings("SPOTIFY.EXE");
-//	loadSettings(m_module);
+	loadSettings(m_module);
 }
 
 Configuration::~Configuration()
