@@ -84,6 +84,7 @@ private:
 	DWORD m_current;
 	DWORD m_goal;
 	DWORD m_bufferSize;
+	LARGE_INTEGER m_lastTimer;
 };
 
 }

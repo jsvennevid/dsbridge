@@ -172,6 +172,7 @@ void Encoder::onCreate(DWORD bufferSize)
 		m_current = 0;
 		m_goal = 0;
 		m_bufferSize = bufferSize;
+		m_lastTimer.QuadPart = 0;
 	}
 	while (0);
 	LeaveCriticalSection(&m_cs);
@@ -182,7 +183,12 @@ void Encoder::onPlay(DWORD position)
 	EnterCriticalSection(&m_cs);
 	do
 	{
-		m_playing = true;
+		if (!m_playing)
+		{
+			QueryPerformanceCounter(&m_lastTimer);
+			m_playing = true;
+		}
+
 		updatePosition(position);
 	}
 	while (0);
@@ -332,13 +338,36 @@ bool Encoder::run()
 
 void Encoder::updatePosition(DWORD position)
 {
-	DWORD actual = position;
-	if (position < m_raw)
+	static int useOldEncodingLimiter = Configuration::getInteger("UseOldEncodingLimiter");
+	if (useOldEncodingLimiter)
 	{
-		actual += m_bufferSize;
+		DWORD actual = position;
+		if (position < m_raw)
+		{
+			actual += m_bufferSize;
+		}
+
+		m_goal += actual - m_raw;
+	}
+	else
+	{
+		LARGE_INTEGER currTimer;
+		QueryPerformanceCounter(&currTimer);
+
+		if (m_playing)
+		{
+			LARGE_INTEGER freq;
+			QueryPerformanceFrequency(&freq);
+
+			double delta = (currTimer.QuadPart - m_lastTimer.QuadPart) / static_cast<double>(freq.QuadPart);
+			DWORD spent = static_cast<DWORD>(delta * 44100);
+
+			m_goal += spent * (2*2);
+		}
+
+		m_lastTimer = currTimer;
 	}
 
-	m_goal += actual - m_raw;
 	m_raw = position;
 }
 
